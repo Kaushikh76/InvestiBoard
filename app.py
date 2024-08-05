@@ -377,11 +377,9 @@ def create_card(card_type):
                 st.session_state.cards.append(new_card)
                 save_canvas_data({"cards": st.session_state.cards, "connections": st.session_state.get("connections", [])})
                 st.success(f"{card_type} card created successfully.")
-                return True
+                st.experimental_rerun()  # Add this line
             else:
                 st.error("Please fill in all required fields.")
-                return False
-        return False
 
 
 def update_card_position(card_id, x, y):
@@ -784,7 +782,15 @@ def display_draggable_cards():
         return card.title || card.name || 'Unnamed Card';
     }}
 
+    function initializeCards(cardData) {{
+    cardContainer.innerHTML = '';  // Clear existing cards
+    cardData.forEach(createCard);
+    }}
+
     function createCard(card) {{
+        if (document.getElementById(card.id)) {{
+        return;
+        }}
         const cardElement = document.createElement('div');
         cardElement.className = 'card';
         cardElement.id = card.id;
@@ -929,7 +935,7 @@ def display_draggable_cards():
 
     // Initialize
     resizeCanvas();
-    cardData.forEach(createCard);
+    initializeCards(cardData);
     drawConnections();
     updateMiniMap();
 
