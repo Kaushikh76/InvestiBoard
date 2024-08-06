@@ -17,6 +17,8 @@ import os
 from dotenv import load_dotenv
 import requests
 import time
+import pandas as pd
+from datetime import datetime
 
 load_dotenv()
 
@@ -362,13 +364,16 @@ def create_card(card_type):
             new_card["condition"] = st.text_input("Condition")
             new_card["notes"] = st.text_area("Notes")
             required_fields = ["title", "evidence_type", "date", "location", "description"]
-        
+
+
         uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
         if uploaded_file is not None:
             image_data = uploaded_file.read()
             new_card["image"] = base64.b64encode(image_data).decode()
         
         submitted = st.form_submit_button("Create Card")
+
+        
         
         if submitted:
             if all(new_card.get(field) for field in required_fields):
@@ -568,6 +573,48 @@ def rag_interface():
             st.write("Answer:", response)
         else:
             st.warning("Please enter a question.")
+
+def create_tabular_view(cards):
+    # Convert cards to a pandas DataFrame
+    df = pd.DataFrame(cards)
+    
+    # Handle 'date' and 'time' columns
+    if 'date' in df.columns:
+        df['date'] = pd.to_datetime(df['date'], errors='coerce').dt.date
+    else:
+        df['date'] = pd.NaT
+
+    if 'time' in df.columns:
+        df['time'] = pd.to_datetime(df['time'], format='%H:%M:%S', errors='coerce').dt.time
+    else:
+        df['time'] = pd.NaT
+
+    # Ensure 'location', 'name', and 'evidence_type' columns exist
+    for col in ['location', 'name', 'evidence_type']:
+        if col not in df.columns:
+            df[col] = ''
+
+    return df
+
+def display_tabular_view(df, sort_by='date', ascending=True, filter_option=None, filter_value=None):
+    # Apply filtering if a filter is selected
+    if filter_option and filter_value:
+        if filter_option in ['location', 'name', 'evidence_type']:
+            df = df[df[filter_option].str.contains(filter_value, case=False, na=False)]
+        elif filter_option == 'suspect_name':
+            df = df[df['name'].str.contains(filter_value, case=False, na=False) & (df['type'] == 'Suspect')]
+        elif filter_option == 'evidence_related':
+            df = df[df['evidence_type'].str.contains(filter_value, case=False, na=False) | 
+                    df['related_evidence'].astype(str).str.contains(filter_value, case=False, na=False)]
+
+    # Sort the DataFrame
+    if sort_by in df.columns:
+        df_sorted = df.sort_values(by=sort_by, ascending=ascending)
+    else:
+        st.warning(f"Cannot sort by '{sort_by}'. Column not found in the data.")
+        df_sorted = df
+
+    return df_sorted
 
 def display_draggable_cards():
     canvas_data = load_canvas_data()
@@ -1176,6 +1223,12 @@ def main():
 
     if 'show_ipfs' not in st.session_state:
         st.session_state.show_ipfs = False
+    
+    if 'show_rag' not in st.session_state:
+        st.session_state.show_rag = False
+
+    if 'show_tabular_view' not in st.session_state:
+        st.session_state.show_tabular_view = False
 
     if st.session_state.authentication_status != True:
         tab1, tab2 = st.tabs(["Sign In", "Sign Up"])
@@ -1216,60 +1269,122 @@ def main():
             with st.expander("Chat with Detective Bot"):
                 chatbot()
             
-            
-            
-            # Toggle button for IPFS File Management
-            if st.button("Toggle IPFS File Management"):
-                st.session_state.show_ipfs = not st.session_state.show_ipfs
-            
-            if st.session_state.show_ipfs:
-                st.subheader("IPFS File Management")
-                
-                if not st.session_state.get('wallet_connected', False):
-                    connect_wallet()
-                else:
-                    st.success(f"Wallet connected: {st.session_state.wallet_address}")
-                    if st.button("Disconnect Wallet"):
-                        disconnect_wallet()
-                        st.experimental_rerun()
-                
-                if st.session_state.get('wallet_connected', False):
-                    ipfs_tabs = st.tabs(["Upload File", "View Files"])
-                    
-                    with ipfs_tabs[0]:
-                        st.subheader("Upload File to IPFS")
-                        uploaded_file = st.file_uploader("Choose a file to upload", type=['pdf', 'docx', 'txt', 'jpg', 'png'])
-                        if uploaded_file is not None:
-                            if st.button("Upload to IPFS"):
-                                with st.spinner("Uploading file to IPFS..."):
-                                    ipfs_hash = upload_to_ipfs(uploaded_file)
-                                    if ipfs_hash:
-                                        st.success(f"File uploaded to IPFS. Hash: {ipfs_hash}")
-                                        # Store the IPFS hash in the user's data
-                                        user_id = st.session_state.user['localId']
-                                        db.child("users").child(user_id).child("ipfs_files").push({"name": uploaded_file.name, "hash": ipfs_hash})
-                    
-                    with ipfs_tabs[1]:
-                        st.subheader("View IPFS Files")
-                        user_id = st.session_state.user['localId']
-                        user_files = db.child("users").child(user_id).child("ipfs_files").get().val()
-                        if user_files:
-                            for file_key, file_data in user_files.items():
-                                st.write(f"File: {file_data['name']}")
-                                st.write(f"IPFS Hash: {file_data['hash']}")
-                                st.markdown(f"[View on IPFS](https://gateway.pinata.cloud/ipfs/{file_data['hash']})")
-                        else:
-                            st.info("No files uploaded yet.")
-                else:
-                    st.warning("Please connect your wallet to access IPFS features.")
-        
+            # Toggle buttons for Tabular View, IPFS, and RAG
+            col_tab, col_ipfs, col_rag = st.columns(3)
+            with col_tab:
+                if st.button("Toggle Tabular View"):
+                    st.session_state.show_tabular_view = not st.session_state.show_tabular_view
+            with col_ipfs:
+                if st.button("Toggle IPFS"):
+                    st.session_state.show_ipfs = not st.session_state.show_ipfs
+            with col_rag:
+                if st.button("Toggle RAG"):
+                    st.session_state.show_rag = not st.session_state.show_rag
             
             if st.button("Clear All Cards"):
                 clear_all_cards()
-            if st.button("Toggle RAG Interface"):
-                st.session_state.show_rag = not st.session_state.get('show_rag', False)
-                st.experimental_rerun()
+
+        # Tabular View (bottom half of the screen)
+        if st.session_state.show_tabular_view:
+            st.markdown("---")
+            tabular_view_container = st.container()
+            with tabular_view_container:
+                st.subheader("Tabular View")
+                if st.session_state.cards:
+                    df = create_tabular_view(st.session_state.cards)
+                    
+                    # Sorting options
+                    sort_options = {
+                        'Time (ascending)': ('time', True),
+                        'Time (descending)': ('time', False),
+                        'Date (ascending)': ('date', True),
+                        'Date (descending)': ('date', False),
+                        'Location': ('location', True),
+                        'Suspect Name': ('name', True),
+                        'Evidence Type': ('evidence_type', True)
+                    }
+                    sort_by = st.selectbox("Sort by:", list(sort_options.keys()))
+                    
+                    # Filtering options
+                    filter_options = ['None', 'Location', 'Suspect Name', 'Evidence Related']
+                    filter_option = st.selectbox("Filter by:", filter_options)
+                    
+                    filter_value = None
+                    if filter_option != 'None':
+                        filter_value = st.text_input(f"Enter {filter_option.lower()} to filter:")
+                    
+                    # Map the selected option to the corresponding DataFrame column
+                    filter_map = {
+                        'Location': 'location',
+                        'Suspect Name': 'suspect_name',
+                        'Evidence Related': 'evidence_related'
+                    }
+                    
+                    # Display the tabular view
+                    df_display = display_tabular_view(
+                        df, 
+                        sort_by=sort_options[sort_by][0],
+                        ascending=sort_options[sort_by][1],
+                        filter_option=filter_map.get(filter_option),
+                        filter_value=filter_value
+                    )
+                    
+                    st.dataframe(df_display)
+                    
+                    # Export to CSV button
+                    if st.button("Export to CSV"):
+                        csv = df_display.to_csv(index=False)
+                        b64 = base64.b64encode(csv.encode()).decode()
+                        href = f'<a href="data:file/csv;base64,{b64}" download="investigation_data.csv">Download CSV File</a>'
+                        st.markdown(href, unsafe_allow_html=True)
+                        
+                else:
+                    st.info("No cards available for tabular view.")
         
+        # IPFS File Management
+        if st.session_state.show_ipfs:
+            st.markdown("---")
+            st.subheader("IPFS File Management")
+            
+            if not st.session_state.get('wallet_connected', False):
+                connect_wallet()
+            else:
+                st.success(f"Wallet connected: {st.session_state.wallet_address}")
+                if st.button("Disconnect Wallet"):
+                    disconnect_wallet()
+                    st.experimental_rerun()
+            
+            if st.session_state.get('wallet_connected', False):
+                ipfs_tabs = st.tabs(["Upload File", "View Files"])
+                
+                with ipfs_tabs[0]:
+                    st.subheader("Upload File to IPFS")
+                    uploaded_file = st.file_uploader("Choose a file to upload", type=['pdf', 'docx', 'txt', 'jpg', 'png'])
+                    if uploaded_file is not None:
+                        if st.button("Upload to IPFS"):
+                            with st.spinner("Uploading file to IPFS..."):
+                                ipfs_hash = upload_to_ipfs(uploaded_file)
+                                if ipfs_hash:
+                                    st.success(f"File uploaded to IPFS. Hash: {ipfs_hash}")
+                                    # Store the IPFS hash in the user's data
+                                    user_id = st.session_state.user['localId']
+                                    db.child("users").child(user_id).child("ipfs_files").push({"name": uploaded_file.name, "hash": ipfs_hash})
+                
+                with ipfs_tabs[1]:
+                    st.subheader("View IPFS Files")
+                    user_id = st.session_state.user['localId']
+                    user_files = db.child("users").child(user_id).child("ipfs_files").get().val()
+                    if user_files:
+                        for file_key, file_data in user_files.items():
+                            st.write(f"File: {file_data['name']}")
+                            st.write(f"IPFS Hash: {file_data['hash']}")
+                            st.markdown(f"[View on IPFS](https://gateway.pinata.cloud/ipfs/{file_data['hash']})")
+                    else:
+                        st.info("No files uploaded yet.")
+            else:
+                st.warning("Please connect your wallet to access IPFS features.")
+
+        # RAG Interface
         if st.session_state.show_rag:
             st.markdown("---")
             rag_interface()
