@@ -23,6 +23,15 @@ import folium
 from streamlit_folium import folium_static
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
+import pandas as pd
+import plotly.express as px
+import difflib
+import matplotlib.pyplot as plt
+import plotly.graph_objects as go
+import seaborn as sns
+from folium.plugins import HeatMap
+from io import BytesIO
+import reportlab
 
 load_dotenv()
 
@@ -556,29 +565,35 @@ def rag_query(query):
 
 def rag_interface():
     st.subheader("Document-based Question Answering System")
-    
-    uploaded_file = st.file_uploader("Upload a document (PDF, DOCX, or TXT)", type=['pdf', 'docx', 'txt'])
-    if uploaded_file:
-        try:
-            file_type = uploaded_file.type.split('/')[-1]
-            text = process_document(uploaded_file, file_type)
-            metadata = {
-                'filename': uploaded_file.name,
-                'filetype': file_type
-            }
-            doc_id = store_document(text, metadata)
-            st.success(f"Document uploaded and processed. ID: {doc_id}")
-        except Exception as e:
-            st.error(f"Error processing document: {str(e)}")
-    
-    query = st.text_input("Ask a question based on the uploaded documents:")
-    if st.button("Get Answer"):
-        if query:
-            with st.spinner("Generating answer..."):
-                response = rag_query(query)
-            st.write("Answer:", response)
-        else:
-            st.warning("Please enter a question.")
+    tool_selection = st.radio("Select Tool", ["RAG", "IPDR Analysis"])
+
+    if tool_selection == "RAG":
+
+        uploaded_file = st.file_uploader("Upload a document (PDF, DOCX, or TXT)", type=['pdf', 'docx', 'txt'])
+        if uploaded_file:
+            try:
+                file_type = uploaded_file.type.split('/')[-1]
+                text = process_document(uploaded_file, file_type)
+                metadata = {
+                    'filename': uploaded_file.name,
+                    'filetype': file_type
+                }
+                doc_id = store_document(text, metadata)
+                st.success(f"Document uploaded and processed. ID: {doc_id}")
+            except Exception as e:
+                st.error(f"Error processing document: {str(e)}")
+        
+        query = st.text_input("Ask a question based on the uploaded documents:")
+        if st.button("Get Answer"):
+            if query:
+                with st.spinner("Generating answer..."):
+                    response = rag_query(query)
+                st.write("Answer:", response)
+            else:
+                st.warning("Please enter a question.")
+
+    elif tool_selection == "IPDR Analysis":
+        ipdr_analysis()
 
 def create_tabular_view(cards):
     # Convert cards to a pandas DataFrame
@@ -1290,7 +1305,474 @@ def handle_map_view():
                 map = connect_all_pins(map, locations)
             folium_static(map, width=800, height=600)
         else:
-            st.warning("No locations to display on the map.")   
+            st.warning("No locations to display on the map.")
+               
+def get_lat_lon(location):
+    geolocator = Nominatim(user_agent="ipdr_analysis")
+    try:
+        loc = geolocator.geocode(location)
+        if loc:
+            return loc.latitude, loc.longitude
+        return None
+    except (GeocoderTimedOut, GeocoderUnavailable):
+        return None
+
+
+def ipdr_analysis():
+    st.subheader("IPDR Analysis")
+    
+    # Initialize session state variables
+    if 'ipdr_df' not in st.session_state:
+        st.session_state.ipdr_df = None
+    if 'ipdr_insights' not in st.session_state:
+        st.session_state.ipdr_insights = None
+    if 'ipdr_messages' not in st.session_state:
+        st.session_state.ipdr_messages = []
+    if 'ipdr_question' not in st.session_state:
+        st.session_state.ipdr_question = ""
+    if 'ipdr_context' not in st.session_state:
+        st.session_state.ipdr_context = ""
+    
+    uploaded_file = st.file_uploader("Upload IPDR CSV file", type=['csv'])
+    if uploaded_file is not None:
+        st.session_state.ipdr_df = pd.read_csv(uploaded_file)
+        df = st.session_state.ipdr_df
+        
+        # Automatic parameter mapping
+        ipdr_params = [
+            "Calling Mobile Number", "Called Mobile Number", "Duration of Session",
+            "Start Time", "End Time", "Amount of Data Transferred",
+            "Internal IP Address", "External IP Address", "Port Number",
+            "Cell Tower ID", "Cell Tower Location", "Azimuth Angle",
+            "Protocol Used", "Service Used"
+        ]
+        parameter_mapping = {}
+        for param in ipdr_params:
+            best_match = difflib.get_close_matches(param, df.columns, n=1, cutoff=0.6)
+            if best_match:
+                parameter_mapping[param] = best_match[0]
+            else:
+                parameter_mapping[param] = None
+        
+        # Rename columns based on mapping
+        reverse_mapping = {v: k for k, v in parameter_mapping.items() if v}
+        df = df.rename(columns=reverse_mapping)
+        
+        # Display data preview
+        with st.expander("IPDR Data Preview", expanded=False):
+            st.dataframe(df.head())
+
+        
+        # Create a 3x3 grid layout for analysis components
+        st.markdown("""
+        <style>
+        .stGrid > div {
+            background-color: #f0f2f6;
+            border-radius: 10px;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        col1, col2, col3 = st.columns(3)
+
+        
+        with col1:
+            with st.container():
+                options = {
+                    "Frequently Called Numbers": ('Called Mobile Number', 'Times Called'),
+                    "Frequently Calling Numbers": ('Calling Mobile Number', 'Times Called'),
+                    "High Data Usage Sessions": ('Amount of Data Transferred', 'Data Transferred'),
+                    "Long Duration Calls": ('Duration of Session', 'Duration'),
+                    "Most Active Cell Towers": ('Cell Tower ID', 'Number of Connections')
+                }
+                
+                selected_option = st.selectbox("Select List:", list(options.keys()))
+                
+                column, value_label = options[selected_option]
+                
+                if column in df.columns:
+                    all_records = df[column].value_counts().reset_index()
+                    all_records.columns = [column, value_label]
+                    
+                    # Pagination
+                    records_per_page = 10
+                    total_pages = len(all_records) // records_per_page + (1 if len(all_records) % records_per_page > 0 else 0)
+                    page = st.number_input("Page", min_value=1, max_value=total_pages, value=1)
+                    
+                    start_idx = (page - 1) * records_per_page
+                    end_idx = start_idx + records_per_page
+                    
+                    st.table(all_records.iloc[start_idx:end_idx])
+                    st.write(f"Page {page} of {total_pages}")
+                else:
+                    st.warning(f"{column} not found in the dataset.")
+        
+        with col2:
+            with st.container():
+                st.markdown("### Value Mapping Graph")
+                
+                # Create a graph
+                G = nx.Graph()
+                
+                # Add nodes and edges based on actual data
+                for _, row in df.iterrows():
+                    caller = row['Calling Mobile Number']
+                    called = row['Called Mobile Number']
+                    duration = row['Duration of Session']
+                    G.add_edge(caller, called, weight=duration)
+                
+                # Limit the graph size for better performance
+                if len(G.nodes()) > 100:
+                    G = nx.k_core(G, 2)  # Keep only nodes with at least 2 connections
+                
+                # Create the plotly figure
+                pos = nx.spring_layout(G)
+                
+                edge_x = []
+                edge_y = []
+                edge_text = []
+                for edge in G.edges(data=True):
+                    x0, y0 = pos[edge[0]]
+                    x1, y1 = pos[edge[1]]
+                    edge_x.extend([x0, x1, None])
+                    edge_y.extend([y0, y1, None])
+                    edge_text.append(f"Duration: {edge[2]['weight']}")
+
+                edge_trace = go.Scatter(
+                    x=edge_x, y=edge_y,
+                    line=dict(width=0.5, color='#888'),
+                    hoverinfo='text',
+                    text=edge_text,
+                    mode='lines')
+
+                node_x = []
+                node_y = []
+                node_text = []
+                node_adjacencies = []
+                for node, adjacencies in G.adjacency():
+                    x, y = pos[node]
+                    node_x.append(x)
+                    node_y.append(y)
+                    node_adjacencies.append(len(adjacencies))
+                    node_text.append(f'{node}<br>{len(adjacencies)}')
+
+                node_trace = go.Scatter(
+                    x=node_x, y=node_y,
+                    mode='markers+text',
+                    hoverinfo='none',
+                    marker=dict(
+                        showscale=True,
+                        colorscale='YlGnBu',
+                        reversescale=True,
+                        color=node_adjacencies,
+                        size=10,
+                        colorbar=dict(
+                            thickness=15,
+                            title='Node Connections',
+                            xanchor='left',
+                            titleside='right'
+                        ),
+                        line_width=2),
+                    text=node_text,
+                    textposition="bottom center",
+                    textfont=dict(size=8)
+                )
+
+                # Create the layout with zoom capabilities
+                layout = go.Layout(
+                    title='Value Mapping Graph',
+                    titlefont_size=16,
+                    showlegend=False,
+                    hovermode='closest',
+                    margin=dict(b=20,l=5,r=5,t=40),
+                    annotations=[ dict(
+                        text="Node color represents number of connections",
+                        showarrow=False,
+                        xref="paper", yref="paper",
+                        x=0.005, y=-0.002 ) ],
+                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                    dragmode='pan'
+                )
+
+                fig = go.Figure(data=[edge_trace, node_trace], layout=layout)
+
+                # Add reset button
+                fig.update_layout(
+                    updatemenus=[
+                        dict(
+                            type="buttons",
+                            direction="left",
+                            buttons=[
+                                dict(args=[{"xaxis.range": [-1.5, 1.5], "yaxis.range": [-1.5, 1.5]}],
+                                     label="Reset View",
+                                     method="relayout"
+                                )
+                            ],
+                            pad={"r": 10, "t": 10},
+                            showactive=False,
+                            x=0.5,
+                            xanchor="center",
+                            y=-0.1,
+                            yanchor="bottom"
+                        ),
+                    ]
+                )
+
+                # Add zoom and pan capabilities
+                fig.update_layout(dragmode='pan')
+                fig.update_xaxes(range=[-1.5, 1.5])
+                fig.update_yaxes(range=[-1.5, 1.5])
+
+                st.plotly_chart(fig, use_container_width=True)
+
+                st.markdown("""
+                **Graph Instructions:**
+                - Pan: Click and drag
+                - Zoom: Scroll or pinch
+                - Reset: Use the 'Reset View' button below the graph
+                - Node labels show: Phone number (top) and number of connections (bottom)
+                - Edge hover: Shows call duration
+                """)
+
+        
+        with col3:
+            with st.container():
+                st.markdown("### Geographic Heatmap")
+                if "Cell Tower Location" in df.columns:
+                    locations = df['Cell Tower Location'].unique()
+                    geolocator = Nominatim(user_agent="ipdr_analysis")
+                    lat_lons = []
+                    for loc in locations:
+                        try:
+                            location = geolocator.geocode(loc)
+                            if location:
+                                lat_lons.append((location.latitude, location.longitude))
+                        except (GeocoderTimedOut, GeocoderUnavailable):
+                            pass
+                    
+                    if lat_lons:
+                        m = folium.Map(location=lat_lons[0], zoom_start=6)
+                        heatmap_data = [[lat, lon, 1] for lat, lon in lat_lons]
+                        HeatMap(heatmap_data).add_to(m)
+                        folium_static(m)
+                    else:
+                        st.warning("Could not geocode any locations for the heatmap.")
+                else:
+                    st.warning("Cell Tower Location column not found in the dataset.")
+        
+        with col1:
+            with st.container():
+                st.markdown("### Session Duration and Timing")
+                if "Start Time" in df.columns:
+                    df['Hour'] = pd.to_datetime(df['Start Time']).dt.hour
+                    hourly_activity = df['Hour'].value_counts().sort_index()
+                    fig = px.line(x=hourly_activity.index, y=hourly_activity.values, title="Hourly Activity")
+                    fig.update_layout(height=300)
+                    st.plotly_chart(fig)
+                else:
+                    st.warning("Start Time column not found in the dataset.")
+                
+                if "Duration of Session" in df.columns:
+                    fig = px.histogram(df, x="Duration of Session", title="Call Duration Distribution", nbins=50)
+                    fig.update_layout(height=300)
+                    st.plotly_chart(fig)
+                else:
+                    st.warning("Duration of Session column not found in the dataset.")
+        
+        with col2:
+            with st.container():
+                st.markdown("### Data Usage Analysis")
+                if "Amount of Data Transferred" in df.columns:
+                    fig = px.histogram(df, x="Amount of Data Transferred", title="Data Usage Distribution", nbins=50)
+                    fig.update_layout(height=300)
+                    st.plotly_chart(fig)
+                    
+                    st.write(f"Total Data Transferred: {df['Amount of Data Transferred'].sum()} bytes")
+                    st.write(f"Average Data per Session: {df['Amount of Data Transferred'].mean():.2f} bytes")
+                else:
+                    st.warning("Amount of Data Transferred column not found in the dataset.")
+        
+        with col3:
+            with st.container():
+                st.markdown("### IP Address Analysis")
+                if "Internal IP Address" in df.columns and "External IP Address" in df.columns:
+                    internal_ips = df['Internal IP Address'].nunique()
+                    external_ips = df['External IP Address'].nunique()
+                    st.write(f"Number of unique internal IPs: {internal_ips}")
+                    st.write(f"Number of unique external IPs: {external_ips}")
+                    
+                    # Visualize IP address distribution
+                    ip_counts = df['Internal IP Address'].value_counts().head(10)
+                    fig = px.bar(x=ip_counts.index, y=ip_counts.values, title="Top 10 Internal IP Addresses")
+                    fig.update_layout(height=300)
+                    st.plotly_chart(fig)
+                else:
+                    st.warning("Internal IP Address or External IP Address columns not found in the dataset.")
+        
+        with col1:
+            with st.container():
+                st.markdown("### Cell Tower and Location Data")
+                if "Azimuth Angle" in df.columns:
+                    fig = px.histogram(df, x="Azimuth Angle", title="Azimuth Angle Distribution", nbins=36)
+                    fig.update_layout(height=300)
+                    st.plotly_chart(fig)
+                else:
+                    st.warning("Azimuth Angle column not found in the dataset.")
+        
+        with col2:
+            with st.container():
+                st.markdown("### Service and Protocol Usage")
+                if "Service Used" in df.columns:
+                    service_usage = df['Service Used'].value_counts()
+                    fig = px.pie(values=service_usage.values, names=service_usage.index, title='Service Usage Distribution')
+                    fig.update_layout(height=300)
+                    st.plotly_chart(fig)
+                else:
+                    st.warning("Service Used column not found in the dataset.")
+        
+        with col3:
+            with st.container():
+                st.markdown("### Correlation Analysis")
+                numeric_columns = df.select_dtypes(include=[np.number]).columns
+                if len(numeric_columns) > 1:
+                    correlation_matrix = df[numeric_columns].corr()
+                    fig = px.imshow(correlation_matrix, text_auto=True, aspect="auto", title="Correlation Matrix")
+                    fig.update_layout(height=400)
+                    st.plotly_chart(fig)
+                else:
+                    st.warning("Not enough numeric columns for correlation analysis.")
+        
+        # Prepare context
+        st.session_state.ipdr_context = f"""
+        IPDR Data Summary:
+        Total Records: {len(df)}
+        Date Range: {df['Start Time'].min() if 'Start Time' in df.columns else 'N/A'} to {df['Start Time'].max() if 'Start Time' in df.columns else 'N/A'}
+        Total Data Transferred: {df['Amount of Data Transferred'].sum() if 'Amount of Data Transferred' in df.columns else 'N/A'} bytes
+        Unique Callers: {df['Calling Mobile Number'].nunique() if 'Calling Mobile Number' in df.columns else 'N/A'}
+        Unique Called Numbers: {df['Called Mobile Number'].nunique() if 'Called Mobile Number' in df.columns else 'N/A'}
+        Most Common Service: {df['Service Used'].mode().values[0] if 'Service Used' in df.columns else 'N/A'}
+        Most Common Protocol: {df['Protocol Used'].mode().values[0] if 'Protocol Used' in df.columns else 'N/A'}
+        Peak Activity Hour: {df.groupby(pd.to_datetime(df['Start Time']).dt.hour).size().idxmax() if 'Start Time' in df.columns else 'N/A'}
+        Most Active Day: {df.groupby(pd.to_datetime(df['Start Time']).dt.day_name()).size().idxmax() if 'Start Time' in df.columns else 'N/A'}
+        """
+        
+        # AI-Generated Insights
+        st.markdown("### AI-Generated Insights")
+        with st.container():
+            if st.session_state.ipdr_insights is None or st.button("Regenerate Insights"):
+                messages = [
+                    {"role": "system", "content": "You are an expert in analyzing IPDR data. Provide insights based on the given data summary."},
+                    {"role": "user", "content": f"{st.session_state.ipdr_context}\n\nProvide key insights and potential areas of interest based on this IPDR data summary."}
+                ]
+                
+                with st.spinner("Generating AI insights..."):
+                    try:
+                        response = client.chat.completions.create(
+                            model="tiiuae/falcon-180b-chat",
+                            messages=messages
+                        )
+                        st.session_state.ipdr_insights = response.choices[0].message.content
+                    except Exception as e:
+                        st.error(f"An error occurred during insight generation: {str(e)}")
+                        st.session_state.ipdr_insights = "Error generating insights."
+            
+            st.write("AI-Generated Insights:", st.session_state.ipdr_insights)
+        
+        # Generate PDF Report button
+        if st.button("Generate PDF Report"):
+            with st.spinner("Generating PDF report..."):
+                pdf_buffer = generate_pdf_report(df, st.session_state.ipdr_insights)
+                st.download_button(
+                    label="Download PDF Report",
+                    data=pdf_buffer,
+                    file_name="ipdr_analysis_report.pdf",
+                    mime="application/pdf"
+                )
+    else:
+        st.warning("Please upload an IPDR CSV file to begin analysis.")
+                    
+def generate_pdf_report(df, insights):
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image
+    from io import BytesIO
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    styles = getSampleStyleSheet()
+    story = []
+
+    # Title
+    story.append(Paragraph("IPDR Analysis Report", styles['Title']))
+    story.append(Spacer(1, 12))
+
+    # Summary Statistics
+    story.append(Paragraph("Summary Statistics", styles['Heading2']))
+    story.append(Paragraph(f"Total Records: {len(df)}", styles['Normal']))
+    story.append(Paragraph(f"Date Range: {df['Start Time'].min()} to {df['Start Time'].max()}", styles['Normal']))
+    story.append(Paragraph(f"Total Data Transferred: {df['Amount of Data Transferred'].sum()} bytes", styles['Normal']))
+    story.append(Spacer(1, 12))
+
+    # AI-Generated Insights
+    story.append(Paragraph("AI-Generated Insights", styles['Heading2']))
+    story.append(Paragraph(insights, styles['Normal']))
+    story.append(Spacer(1, 12))
+
+    # Visualizations
+    story.append(Paragraph("Data Visualizations", styles['Heading2']))
+    
+    # Hourly Activity
+    plt.figure(figsize=(8, 4))
+    df['Hour'] = pd.to_datetime(df['Start Time']).dt.hour
+    hourly_activity = df['Hour'].value_counts().sort_index()
+    sns.lineplot(x=hourly_activity.index, y=hourly_activity.values)
+    plt.title("Hourly Activity")
+    plt.xlabel("Hour of Day")
+    plt.ylabel("Number of Sessions")
+    img_buffer = BytesIO()
+    plt.savefig(img_buffer, format='png')
+    img_buffer.seek(0)
+    story.append(Image(img_buffer, width=400, height=200))
+    story.append(Spacer(1, 12))
+    
+    # Call Duration Distribution
+    plt.figure(figsize=(8, 4))
+    sns.histplot(df['Duration of Session'], bins=50)
+    plt.title("Call Duration Distribution")
+    plt.xlabel("Duration (seconds)")
+    plt.ylabel("Frequency")
+    img_buffer = BytesIO()
+    plt.savefig(img_buffer, format='png')
+    img_buffer.seek(0)
+    story.append(Image(img_buffer, width=400, height=200))
+    
+    # Build the PDF
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def generate_key_statistics(df):
+    return {
+        "total_records": len(df),
+        "date_range": {
+            "start": df['Start Time'].min(),
+            "end": df['Start Time'].max()
+        },
+        "total_data_transferred": df['Amount of Data Transferred'].sum(),
+        "unique_callers": df['Calling Mobile Number'].nunique(),
+        "unique_called_numbers": df['Called Mobile Number'].nunique(),
+        "most_common_service": df['Service Used'].mode().values[0],
+        "most_common_protocol": df['Protocol Used'].mode().values[0],
+        "peak_activity_hour": df.groupby(pd.to_datetime(df['Start Time']).dt.hour).size().idxmax(),
+        "most_active_day": df.groupby(pd.to_datetime(df['Start Time']).dt.day_name()).size().idxmax()
+    }
 
 def main():
     st.set_page_config(layout="wide")
@@ -1331,13 +1813,11 @@ def main():
                 with st.expander("Connect Cards", expanded=False):
                     connect_cards()
                 
-                clear_cards = st.button("Clear All Cards")
-                if clear_cards:
-                    confirm_clear = st.button("Are you sure you want to clear all cards?")
-                    if confirm_clear:
-                        clear_all_cards()
-                        st.success("All cards have been cleared.")
-                        st.experimental_rerun()
+                if st.button("Clear All Cards"):
+                    clear_all_cards()
+                    st.success("All cards have been cleared.")
+                    st.experimental_rerun()
+
         
         with tab2:
             tool_tabs = st.tabs(["Map View", "Tabular View", "Chatbot", "IPFS", "RAG"])
@@ -1457,7 +1937,7 @@ def main():
                     st.warning("Please connect your wallet to access IPFS features.")
             
             with tool_tabs[4]:  # RAG
-                st.header("Document-based Question Answering System")
+                st.header("RAG & IPDR Analysis")
                 rag_interface()
 
 if __name__ == "__main__":
