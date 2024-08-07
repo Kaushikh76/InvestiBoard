@@ -1,6 +1,8 @@
+exa_py==1.0.17
 folium==0.17.0
 geopy==2.4.1
 matplotlib==3.9.1.post1
+networkx==3.2.1
 networkx==3.3
 numpy==2.0.1
 openai==1.40.0

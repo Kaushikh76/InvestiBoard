@@ -32,6 +32,9 @@ import seaborn as sns
 from folium.plugins import HeatMap
 from io import BytesIO
 import reportlab
+from exa_py import Exa
+from datetime import datetime, timedelta
+
 
 load_dotenv()
 
@@ -40,6 +43,7 @@ PINATA_API_KEY = os.getenv("PINATA_API_KEY")
 PINATA_SECRET_API_KEY = os.getenv("PINATA_SECRET_API_KEY")
 PINATA_JWT = os.getenv("PINATA_JWT")
 PINATA_BASE_URL = "https://api.pinata.cloud"
+EXA_API_KEY = os.getenv("EXA_API_KEY")
 
 # Web3 setup
 WEB3_PROVIDER_URL = os.getenv("WEB3_PROVIDER_URL")
@@ -193,7 +197,7 @@ def sign_in():
             st.success("Signed in successfully!")
             st.session_state.user = user
             st.session_state.authentication_status = True
-            load_canvas_data()  # Load canvas data immediately after successful sign-in
+            load_canvas_data()  
         except Exception as e:
             st.error(f"Error: {e}")
 
@@ -397,7 +401,7 @@ def create_card(card_type):
                 st.session_state.cards.append(new_card)
                 save_canvas_data({"cards": st.session_state.cards, "connections": st.session_state.get("connections", [])})
                 st.success(f"{card_type} card created successfully.")
-                st.experimental_rerun()  # Add this line
+                st.experimental_rerun()  
             else:
                 st.error("Please fill in all required fields.")
 
@@ -440,11 +444,9 @@ def edit_card():
                     st.rerun()
 
 def clear_all_cards():
-    # Clear cards from session state
     st.session_state.cards = []
     st.session_state.connections = []
     
-    # Clear cards from Firebase
     if st.session_state.user:
         user_id = st.session_state.user['localId']
         db.child("users").child(user_id).child("canvas").set({})
@@ -596,10 +598,8 @@ def rag_interface():
         ipdr_analysis()
 
 def create_tabular_view(cards):
-    # Convert cards to a pandas DataFrame
     df = pd.DataFrame(cards)
     
-    # Handle 'date' and 'time' columns
     if 'date' in df.columns:
         df['date'] = pd.to_datetime(df['date'], errors='coerce').dt.date
     else:
@@ -610,7 +610,6 @@ def create_tabular_view(cards):
     else:
         df['time'] = pd.NaT
 
-    # Ensure 'location', 'name', and 'evidence_type' columns exist
     for col in ['location', 'name', 'evidence_type']:
         if col not in df.columns:
             df[col] = ''
@@ -618,7 +617,6 @@ def create_tabular_view(cards):
     return df
 
 def display_tabular_view(df, sort_by='date', ascending=True, filter_option=None, filter_value=None):
-    # Apply filtering if a filter is selected
     if filter_option and filter_value:
         if filter_option in ['location', 'name', 'evidence_type']:
             df = df[df[filter_option].str.contains(filter_value, case=False, na=False)]
@@ -628,7 +626,6 @@ def display_tabular_view(df, sort_by='date', ascending=True, filter_option=None,
             df = df[df['evidence_type'].str.contains(filter_value, case=False, na=False) | 
                     df['related_evidence'].astype(str).str.contains(filter_value, case=False, na=False)]
 
-    # Sort the DataFrame
     if sort_by in df.columns:
         df_sorted = df.sort_values(by=sort_by, ascending=ascending)
     else:
@@ -642,7 +639,6 @@ def display_draggable_cards():
     card_data = json.dumps(canvas_data.get("cards", []))
     connection_data = json.dumps(canvas_data.get("connections", []))
     
-    # HTML and JavaScript for draggable cards
     html_content = f"""
     <style>
     #outer-container {{
@@ -1120,7 +1116,6 @@ def display_draggable_cards():
 
     st.components.v1.html(html_content, height=820)
 
-    # Handle updates from JavaScript
     if st.session_state.card_updates:
         try:
             data = json.loads(st.session_state.card_updates)
@@ -1131,7 +1126,7 @@ def display_draggable_cards():
             elif action.get('type') == 'update':
                 update_card_position(action['cardId'], action['x'], action['y'])
             
-            st.session_state.card_updates = None  # Clear the updates after processing
+            st.session_state.card_updates = None 
         except json.JSONDecodeError:
             st.error("Error processing card updates. Please try again.")
         except KeyError as e:
@@ -1182,10 +1177,8 @@ def chatbot():
                 clear_button = st.form_submit_button("Clear Chat")
 
         if submit_button and prompt:
-            # Add user message to chat history
             st.session_state.messages.append({"role": "user", "content": prompt})
 
-            # Prepare context with all card information
             context = "Case Information:\n"
             if "cards" in st.session_state and st.session_state.cards:
                 for card in st.session_state.cards:
@@ -1197,7 +1190,6 @@ def chatbot():
             else:
                 context += "No cards have been added to the investigation board yet.\n"
 
-            # Add connection information if available
             if "connections" in st.session_state and st.session_state.connections:
                 context += "Connections:\n"
                 for connection in st.session_state.connections:
@@ -1219,17 +1211,14 @@ def chatbot():
                 st.error(f"An error occurred: {str(e)}")
                 full_response = "I'm sorry, but I encountered an error. Please try again later."
 
-            # Add assistant response to chat history
             st.session_state.messages.append({"role": "assistant", "content": full_response})
             
-            # Rerun to update the chat display
             st.experimental_rerun()
 
         if clear_button:
             st.session_state.messages = []
             st.experimental_rerun()
 
-    # Debugging: Print the contents of st.session_state.cards
     st.write("Debug - Cards in session state:", st.session_state.get("cards", []))
 
 def get_coordinates(location):
@@ -1255,11 +1244,9 @@ def create_map_with_pins(cards, filter_option=None, filter_value=None, sort_by=N
         st.warning("No valid locations found in the cards.")
         return None, []
 
-    # Apply filtering
     if filter_option and filter_value:
         locations = [loc for loc in locations if filter_value.lower() in str(loc[4].get(filter_option, '')).lower()]
 
-    # Apply sorting
     if sort_by:
         locations.sort(key=lambda x: x[4].get(sort_by, ''))
 
@@ -1287,7 +1274,6 @@ def connect_all_pins(m, locations):
     folium.PolyLine(coordinates, color="purple", weight=2, opacity=0.8).add_to(m)
     return m
 
-# In the main function or wherever you're handling the map view:
 def handle_map_view():
     st.header("Map View")
     col1, col2 = st.columns([3, 1])
@@ -1321,7 +1307,6 @@ def get_lat_lon(location):
 def ipdr_analysis():
     st.subheader("IPDR Analysis")
     
-    # Initialize session state variables
     if 'ipdr_df' not in st.session_state:
         st.session_state.ipdr_df = None
     if 'ipdr_insights' not in st.session_state:
@@ -1338,7 +1323,6 @@ def ipdr_analysis():
         st.session_state.ipdr_df = pd.read_csv(uploaded_file)
         df = st.session_state.ipdr_df
         
-        # Automatic parameter mapping
         ipdr_params = [
             "Calling Mobile Number", "Called Mobile Number", "Duration of Session",
             "Start Time", "End Time", "Amount of Data Transferred",
@@ -1354,16 +1338,13 @@ def ipdr_analysis():
             else:
                 parameter_mapping[param] = None
         
-        # Rename columns based on mapping
         reverse_mapping = {v: k for k, v in parameter_mapping.items() if v}
         df = df.rename(columns=reverse_mapping)
         
-        # Display data preview
         with st.expander("IPDR Data Preview", expanded=False):
             st.dataframe(df.head())
 
         
-        # Create a 3x3 grid layout for analysis components
         st.markdown("""
         <style>
         .stGrid > div {
@@ -1774,6 +1755,88 @@ def generate_key_statistics(df):
         "most_active_day": df.groupby(pd.to_datetime(df['Start Time']).dt.day_name()).size().idxmax()
     }
 
+exa = Exa(EXA_API_KEY)
+
+def generate_search_query(question):
+    SYSTEM_MESSAGE = "You are a helpful assistant that generates search queries based on user questions. Only generate one search query."
+    
+    try:
+        completion = client.chat.completions.create(
+            model="tiiuae/falcon-180b-chat",
+            messages=[
+                {"role": "system", "content": SYSTEM_MESSAGE},
+                {"role": "user", "content": question},
+            ],
+        )
+        search_query = completion.choices[0].message.content
+        return search_query
+    except Exception as e:
+        st.error(f"Error generating search query: {str(e)}")
+        return None
+
+def search_internet(question):
+    search_query = generate_search_query(question)
+    if not search_query:
+        return None, None
+
+    one_week_ago = (datetime.now() - timedelta(days=7))
+    date_cutoff = one_week_ago.strftime("%Y-%m-%d")
+
+    try:
+        search_response = exa.search_and_contents(
+            search_query, use_autoprompt=True, start_published_date=date_cutoff
+        )
+        
+        urls = [result.url for result in search_response.results]
+        contents = [result.text for result in search_response.results]
+        
+        return urls, contents
+    except Exception as e:
+        st.error(f"Error searching the internet: {str(e)}")
+        return None, None
+
+def summarize_search_results(question, urls, contents):
+    if not urls or not contents:
+        return "Sorry, I couldn't find any relevant information."
+
+    context = "\n\n".join([f"URL: {url}\nContent: {content[:500]}..." for url, content in zip(urls[:3], contents[:3])])
+    
+    prompt = f"""Based on the following search results, please provide a concise summary answering the question: "{question}"
+    
+    Search Results:
+    {context}
+    
+    Summary:"""
+
+    try:
+        response = client.chat.completions.create(
+            model="tiiuae/falcon-180b-chat",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that summarizes search results to answer user questions. Provide a concise summary and always cite the sources using [1], [2], etc."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        st.error(f"Error summarizing search results: {str(e)}")
+        return "Sorry, I encountered an error while summarizing the search results."
+
+def internet_search_interface():
+    st.subheader("Internet Search")
+    
+    query = st.text_input("Enter your question:")
+    if st.button("Search"):
+        with st.spinner("Searching the internet..."):
+            urls, contents = search_internet(query)
+            if urls and contents:
+                summary = summarize_search_results(query, urls, contents)
+                st.write("Summary:")
+                st.write(summary)
+                st.write("Sources:")
+                for i, url in enumerate(urls[:3], 1):
+                    st.write(f"[{i}] {url}")
+            else:
+                st.warning("No results found or an error occurred during the search.")
 
 
 def main():
@@ -1797,7 +1860,6 @@ def main():
             sign_out()
             st.experimental_rerun()
         
-        # Main content area
         tab1, tab2 = st.tabs(["Investigation Board", "Analysis Tools"])
         
         with tab1:
@@ -1815,7 +1877,6 @@ def main():
                 with st.expander("Connect Cards", expanded=False):
                     connect_cards()
                 
-                # Move chatbot here
                 chatbot()
                 
                 if st.button("Clear All Cards"):
@@ -1825,9 +1886,9 @@ def main():
 
         
         with tab2:
-            tool_tabs = st.tabs(["Map View", "Tabular View", "IPFS", "RAG"])
+            tool_tabs = st.tabs(["Map View", "Tabular View", "IPFS", "RAG", "Internet Search"])
             
-            with tool_tabs[0]:  # Map View
+            with tool_tabs[0]:  
                 st.header("Map View")
                 col1, col2 = st.columns([3, 1])
                 
@@ -1846,7 +1907,7 @@ def main():
                     else:
                         st.warning("No locations to display on the map.")
             
-            with tool_tabs[1]:  # Tabular View
+            with tool_tabs[1]: 
                 st.header("Tabular View")
                 if st.session_state.cards:
                     df = create_tabular_view(st.session_state.cards)
@@ -1897,7 +1958,7 @@ def main():
                 else:
                     st.info("No cards available for tabular view.")
             
-            with tool_tabs[2]:  # IPFS
+            with tool_tabs[2]:  
                 st.header("IPFS File Management")
                 
                 if not st.session_state.get('wallet_connected', False):
@@ -1937,9 +1998,14 @@ def main():
                 else:
                     st.warning("Please connect your wallet to access IPFS features.")
             
-            with tool_tabs[3]:  # RAG
+            with tool_tabs[3]:  
                 st.header("RAG & IPDR Analysis")
                 rag_interface()
+            
+            with tool_tabs[4]:
+                internet_search_interface()
+
 
 if __name__ == "__main__":
     main()
+
