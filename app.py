@@ -1160,7 +1160,7 @@ def extract_text_from_docx(file):
         return ""
 
 def chatbot():
-    st.subheader("Detective's Assistant Chatbot")
+    st.subheader("Investigation Assistant")
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -1774,9 +1774,11 @@ def generate_key_statistics(df):
         "most_active_day": df.groupby(pd.to_datetime(df['Start Time']).dt.day_name()).size().idxmax()
     }
 
+
+
 def main():
     st.set_page_config(layout="wide")
-    st.title("Detective's Investigation Tool")
+    st.title("InvestiBoard")
 
     initialize_session_state()
     
@@ -1813,6 +1815,9 @@ def main():
                 with st.expander("Connect Cards", expanded=False):
                     connect_cards()
                 
+                # Move chatbot here
+                chatbot()
+                
                 if st.button("Clear All Cards"):
                     clear_all_cards()
                     st.success("All cards have been cleared.")
@@ -1820,7 +1825,7 @@ def main():
 
         
         with tab2:
-            tool_tabs = st.tabs(["Map View", "Tabular View", "Chatbot", "IPFS", "RAG"])
+            tool_tabs = st.tabs(["Map View", "Tabular View", "IPFS", "RAG"])
             
             with tool_tabs[0]:  # Map View
                 st.header("Map View")
@@ -1892,11 +1897,7 @@ def main():
                 else:
                     st.info("No cards available for tabular view.")
             
-            with tool_tabs[2]:  # Chatbot
-                st.header("Detective's Assistant Chatbot")
-                chatbot()
-            
-            with tool_tabs[3]:  # IPFS
+            with tool_tabs[2]:  # IPFS
                 st.header("IPFS File Management")
                 
                 if not st.session_state.get('wallet_connected', False):
@@ -1936,7 +1937,7 @@ def main():
                 else:
                     st.warning("Please connect your wallet to access IPFS features.")
             
-            with tool_tabs[4]:  # RAG
+            with tool_tabs[3]:  # RAG
                 st.header("RAG & IPDR Analysis")
                 rag_interface()
 
