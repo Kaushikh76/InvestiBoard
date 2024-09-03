@@ -1,4 +1,4 @@
-InvestiBoard
+#InvestiBoard
 
  A First of it’s kind Virtual Investigation Board with LLM support.
 
