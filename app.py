@@ -51,7 +51,7 @@ web3 = Web3(Web3.HTTPProvider(WEB3_PROVIDER_URL))
 
 # Set up OpenAI client
 AI71_BASE_URL = "https://api.ai71.ai/v1/"
-AI71_API_KEY = "api71-api-ee730785-33fe-41ae-a5ac-cc66e8c0d02d"
+AI71_API_KEY = ""
 client = openai.OpenAI(
     api_key=AI71_API_KEY,
     base_url=AI71_BASE_URL,
