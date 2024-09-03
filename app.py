@@ -62,14 +62,14 @@ logger = logging.getLogger(__name__)
 
 # Firebase Configuration
 firebaseConfig = {
-    "apiKey": "AIzaSyC-G1JRKBZtWjtu02WKCmizdBmXMMP3PAA",
+    "apiKey": "**",
     "authDomain": "investiboard.firebaseapp.com",
     "projectId": "investiboard",
-    "storageBucket": "investiboard.appspot.com",
-    "messagingSenderId": "556809275550",
-    "appId": "1:556809275550:web:a37e3770466ea4011b138f",
-    "measurementId": "G-DGNP1CF7QK",
-    "databaseURL" : "https://investiboard-default-rtdb.asia-southeast1.firebasedatabase.app/"
+    "storageBucket": "**",
+    "messagingSenderId": "**",
+    "appId": "**",
+    "measurementId": "**",
+    "databaseURL" : "**"
 }
 
 # Initialize Firebase
